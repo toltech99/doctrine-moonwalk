@@ -1,0 +1,17 @@
+{
+    
+    "authors": [
+        {
+            "name": "Gustavo Santos",
+            "email": "toltech99@gmail.com",
+            "role": "Developer"
+        }
+    ],
+
+    
+    "require": {
+        "doctrine/orm": "*",
+
+        "mpdf/mpdf":"*"
+    }
+}
