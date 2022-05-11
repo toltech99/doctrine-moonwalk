@@ -1,14 +1,28 @@
 <?php
 
-declare(strict_types=1);
+/*
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * This software consists of voluntary contributions made by many individuals
+ * and is licensed under the MIT license. For more information, see
+ * <http://www.doctrine-project.org>.
+ */
 
 namespace Doctrine\ORM\Cache;
 
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Proxy\Proxy;
 use Doctrine\ORM\Cache;
-use Doctrine\ORM\Cache\Exception\FeatureNotImplemented;
-use Doctrine\ORM\Cache\Exception\NonCacheableEntity;
 use Doctrine\ORM\Cache\Logging\CacheLogger;
 use Doctrine\ORM\Cache\Persister\Entity\CachedEntityPersister;
 use Doctrine\ORM\EntityManagerInterface;
@@ -18,6 +32,7 @@ use Doctrine\ORM\Query;
 use Doctrine\ORM\Query\ResultSetMapping;
 use Doctrine\ORM\UnitOfWork;
 
+use function array_key_exists;
 use function array_map;
 use function array_shift;
 use function array_unshift;
@@ -32,7 +47,7 @@ use function reset;
  */
 class DefaultQueryCache implements QueryCache
 {
-    /** @var EntityManagerInterface */
+     /** @var EntityManagerInterface */
     private $em;
 
     /** @var UnitOfWork */
@@ -44,7 +59,7 @@ class DefaultQueryCache implements QueryCache
     /** @var QueryCacheValidator */
     private $validator;
 
-    /** @var CacheLogger|null */
+    /** @var CacheLogger */
     protected $cacheLogger;
 
     /** @var array<string,mixed> */
@@ -171,7 +186,7 @@ class DefaultQueryCache implements QueryCache
                 $assocEntries = $assocRegion->getMultiple($assocKeys);
 
                 foreach ($assoc['list'] as $assocIndex => $assocId) {
-                    $assocEntry = is_array($assocEntries) ? ($assocEntries[$assocIndex] ?? null) : null;
+                    $assocEntry = is_array($assocEntries) && array_key_exists($assocIndex, $assocEntries) ? $assocEntries[$assocIndex] : null;
 
                     if ($assocEntry === null) {
                         if ($this->cacheLogger !== null) {
@@ -230,19 +245,19 @@ class DefaultQueryCache implements QueryCache
     public function put(QueryCacheKey $key, ResultSetMapping $rsm, $result, array $hints = [])
     {
         if ($rsm->scalarMappings) {
-            throw FeatureNotImplemented::scalarResults();
+            throw new CacheException('Second level cache does not support scalar results.');
         }
 
         if (count($rsm->entityMappings) > 1) {
-            throw FeatureNotImplemented::multipleRootEntities();
+            throw new CacheException('Second level cache does not support multiple root entities.');
         }
 
         if (! $rsm->isSelect) {
-            throw FeatureNotImplemented::nonSelectStatements();
+            throw new CacheException('Second-level cache query supports only select statements.');
         }
 
         if (($hints[Query\SqlWalker::HINT_PARTIAL] ?? false) === true || ($hints[Query::HINT_FORCE_PARTIAL_LOAD] ?? false) === true) {
-            throw FeatureNotImplemented::partialEntities();
+            throw new CacheException('Second level cache does not support partial entities.');
         }
 
         if (! ($key->cacheMode & Cache::MODE_PUT)) {
@@ -255,7 +270,7 @@ class DefaultQueryCache implements QueryCache
         $persister  = $this->uow->getEntityPersister($entityName);
 
         if (! $persister instanceof CachedEntityPersister) {
-            throw NonCacheableEntity::fromEntity($entityName);
+            throw CacheException::nonCacheableEntity($entityName);
         }
 
         $region = $persister->getCacheRegion();
@@ -330,9 +345,10 @@ class DefaultQueryCache implements QueryCache
      * @param mixed               $assocValue
      *
      * @return mixed[]|null
-     * @psalm-return array{targetEntity: class-string, type: mixed, list?: array[], identifier?: array}|null
+     *
+     * @psalm-return array{targetEntity: string, type: mixed, list?: array[], identifier?: array}|null
      */
-    private function storeAssociationCache(QueryCacheKey $key, array $assoc, $assocValue): ?array
+    private function storeAssociationCache(QueryCacheKey $key, array $assoc, $assocValue)
     {
         $assocPersister = $this->uow->getEntityPersister($assoc['targetEntity']);
         $assocMetadata  = $assocPersister->getClassMetadata();
@@ -382,16 +398,13 @@ class DefaultQueryCache implements QueryCache
     }
 
     /**
+     * @param string $assocAlias
      * @param object $entity
      *
-     * @return mixed[]|object|null
-     * @psalm-return list<mixed>|object|null
+     * @return array<object>|object
      */
-    private function getAssociationValue(
-        ResultSetMapping $rsm,
-        string $assocAlias,
-        $entity
-    ) {
+    private function getAssociationValue(ResultSetMapping $rsm, $assocAlias, $entity)
+    {
         $path  = [];
         $alias = $assocAlias;
 
@@ -412,11 +425,10 @@ class DefaultQueryCache implements QueryCache
     }
 
     /**
-     * @param mixed $value
-     * @psalm-param array<array-key, array{field: string, class: string}> $path
+     * @param mixed        $value
+     * @param array<mixed> $path
      *
-     * @return mixed[]|object|null
-     * @psalm-return list<mixed>|object|null
+     * @return mixed
      */
     private function getAssociationPathValue($value, array $path)
     {
@@ -429,7 +441,7 @@ class DefaultQueryCache implements QueryCache
             return null;
         }
 
-        if ($path === []) {
+        if (empty($path)) {
             return $value;
         }
 

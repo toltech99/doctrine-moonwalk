@@ -1,41 +1,49 @@
 <?php
 
-declare(strict_types=1);
+/*
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * This software consists of voluntary contributions made by many individuals
+ * and is licensed under the MIT license. For more information, see
+ * <http://www.doctrine-project.org>.
+ */
 
 namespace Doctrine\ORM\Persisters\Entity;
 
-use BackedEnum;
 use Doctrine\Common\Collections\Criteria;
 use Doctrine\Common\Collections\Expr\Comparison;
 use Doctrine\Common\Util\ClassUtils;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\LockMode;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
-use Doctrine\DBAL\Result;
+use Doctrine\DBAL\Statement;
 use Doctrine\DBAL\Types\Type;
-use Doctrine\DBAL\Types\Types;
-use Doctrine\Deprecations\Deprecation;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\MappingException;
 use Doctrine\ORM\Mapping\QuoteStrategy;
 use Doctrine\ORM\OptimisticLockException;
+use Doctrine\ORM\ORMException;
 use Doctrine\ORM\PersistentCollection;
-use Doctrine\ORM\Persisters\Exception\CantUseInOperatorOnCompositeKeys;
-use Doctrine\ORM\Persisters\Exception\InvalidOrientation;
-use Doctrine\ORM\Persisters\Exception\UnrecognizedField;
 use Doctrine\ORM\Persisters\SqlExpressionVisitor;
 use Doctrine\ORM\Persisters\SqlValueVisitor;
 use Doctrine\ORM\Query;
 use Doctrine\ORM\Query\QueryException;
-use Doctrine\ORM\Repository\Exception\InvalidFindByCall;
 use Doctrine\ORM\UnitOfWork;
 use Doctrine\ORM\Utility\IdentifierFlattener;
 use Doctrine\ORM\Utility\PersisterHelper;
-use LengthException;
 
 use function array_combine;
-use function array_keys;
 use function array_map;
 use function array_merge;
 use function array_search;
@@ -43,13 +51,14 @@ use function array_unique;
 use function array_values;
 use function assert;
 use function count;
+use function get_class;
 use function implode;
 use function is_array;
 use function is_object;
 use function reset;
-use function spl_object_id;
+use function spl_object_hash;
 use function sprintf;
-use function str_contains;
+use function strpos;
 use function strtoupper;
 use function trim;
 
@@ -136,7 +145,7 @@ class BasicEntityPersister implements EntityPersister
     /**
      * Queued inserts.
      *
-     * @psalm-var array<int, object>
+     * @psalm-var array<string, object>
      */
     protected $queuedInserts = [];
 
@@ -165,7 +174,7 @@ class BasicEntityPersister implements EntityPersister
      * The INSERT SQL statement used for entities handled by this persister.
      * This SQL is only generated once per request, if at all.
      *
-     * @var string|null
+     * @var string
      */
     private $insertSql;
 
@@ -237,7 +246,7 @@ class BasicEntityPersister implements EntityPersister
      */
     public function addInsert($entity)
     {
-        $this->queuedInserts[spl_object_id($entity)] = $entity;
+        $this->queuedInserts[spl_object_hash($entity)] = $entity;
     }
 
     /**
@@ -275,10 +284,10 @@ class BasicEntityPersister implements EntityPersister
                 }
             }
 
-            $stmt->executeStatement();
+            $stmt->execute();
 
             if ($isPostInsertId) {
-                $generatedId     = $idGenerator->generateId($this->em, $entity);
+                $generatedId     = $idGenerator->generate($this->em, $entity);
                 $id              = [$this->class->identifier[0] => $generatedId];
                 $postInsertIds[] = [
                     'generatedId' => $generatedId,
@@ -288,11 +297,12 @@ class BasicEntityPersister implements EntityPersister
                 $id = $this->class->getIdentifierValues($entity);
             }
 
-            if ($this->class->requiresFetchAfterChange) {
-                $this->assignDefaultVersionAndUpsertableValues($entity, $id);
+            if ($this->class->isVersioned) {
+                $this->assignDefaultVersionValue($entity, $id);
             }
         }
 
+        $stmt->closeCursor();
         $this->queuedInserts = [];
 
         return $postInsertIds;
@@ -301,78 +311,59 @@ class BasicEntityPersister implements EntityPersister
     /**
      * Retrieves the default version value which was created
      * by the preceding INSERT statement and assigns it back in to the
-     * entities version field if the given entity is versioned.
-     * Also retrieves values of columns marked as 'non insertable' and / or
-     * 'not updatable' and assigns them back to the entities corresponding fields.
+     * entities version field.
      *
      * @param object  $entity
      * @param mixed[] $id
      *
      * @return void
      */
-    protected function assignDefaultVersionAndUpsertableValues($entity, array $id)
+    protected function assignDefaultVersionValue($entity, array $id)
     {
-        $values = $this->fetchVersionAndNotUpsertableValues($this->class, $id);
+        $value = $this->fetchVersionValue($this->class, $id);
 
-        foreach ($values as $field => $value) {
-            $value = Type::getType($this->class->fieldMappings[$field]['type'])->convertToPHPValue($value, $this->platform);
-
-            $this->class->setFieldValue($entity, $field, $value);
-        }
+        $this->class->setFieldValue($entity, $this->class->versionField, $value);
     }
 
     /**
-     * Fetches the current version value of a versioned entity and / or the values of fields
-     * marked as 'not insertable' and / or 'not updatable'.
+     * Fetches the current version value of a versioned entity.
      *
      * @param ClassMetadata $versionedClass
      * @param mixed[]       $id
      *
      * @return mixed
      */
-    protected function fetchVersionAndNotUpsertableValues($versionedClass, array $id)
+    protected function fetchVersionValue($versionedClass, array $id)
     {
-        $columnNames = [];
-        foreach ($this->class->fieldMappings as $key => $column) {
-            if (isset($column['generated']) || ($this->class->isVersioned && $key === $versionedClass->versionField)) {
-                $columnNames[$key] = $this->quoteStrategy->getColumnName($key, $versionedClass, $this->platform);
-            }
-        }
-
-        $tableName  = $this->quoteStrategy->getTableName($versionedClass, $this->platform);
-        $identifier = $this->quoteStrategy->getIdentifierColumnNames($versionedClass, $this->platform);
+        $versionField = $versionedClass->versionField;
+        $fieldMapping = $versionedClass->fieldMappings[$versionField];
+        $tableName    = $this->quoteStrategy->getTableName($versionedClass, $this->platform);
+        $identifier   = $this->quoteStrategy->getIdentifierColumnNames($versionedClass, $this->platform);
+        $columnName   = $this->quoteStrategy->getColumnName($versionField, $versionedClass, $this->platform);
 
         // FIXME: Order with composite keys might not be correct
-        $sql = 'SELECT ' . implode(', ', $columnNames)
-            . ' FROM ' . $tableName
-            . ' WHERE ' . implode(' = ? AND ', $identifier) . ' = ?';
+        $sql = 'SELECT ' . $columnName
+             . ' FROM ' . $tableName
+             . ' WHERE ' . implode(' = ? AND ', $identifier) . ' = ?';
 
         $flatId = $this->identifierFlattener->flattenIdentifier($versionedClass, $id);
 
-        $values = $this->conn->fetchNumeric(
+        $value = $this->conn->fetchColumn(
             $sql,
             array_values($flatId),
+            0,
             $this->extractIdentifierTypes($id, $versionedClass)
         );
 
-        if ($values === false) {
-            throw new LengthException('Unexpected empty result for database query.');
-        }
-
-        $values = array_combine(array_keys($columnNames), $values);
-
-        if (! $values) {
-            throw new LengthException('Unexpected number of database columns.');
-        }
-
-        return $values;
+        return Type::getType($fieldMapping['type'])->convertToPHPValue($value, $this->platform);
     }
 
     /**
      * @param mixed[] $id
      *
      * @return int[]|null[]|string[]
-     * @psalm-return list<int|string|null>
+     *
+     * @psalm-return list<(int|string|null)>
      */
     private function extractIdentifierTypes(array $id, ClassMetadata $versionedClass): array
     {
@@ -408,10 +399,10 @@ class BasicEntityPersister implements EntityPersister
 
         $this->updateTable($entity, $quotedTableName, $data, $isVersioned);
 
-        if ($this->class->requiresFetchAfterChange) {
+        if ($isVersioned) {
             $id = $this->class->getIdentifierValues($entity);
 
-            $this->assignDefaultVersionAndUpsertableValues($entity, $id);
+            $this->assignDefaultVersionValue($entity, $id);
         }
     }
 
@@ -424,15 +415,13 @@ class BasicEntityPersister implements EntityPersister
      * @param mixed[] $updateData      The map of columns to update (column => value).
      * @param bool    $versioned       Whether the UPDATE should be versioned.
      *
-     * @throws UnrecognizedField
+     * @return void
+     *
+     * @throws ORMException
      * @throws OptimisticLockException
      */
-    final protected function updateTable(
-        $entity,
-        $quotedTableName,
-        array $updateData,
-        $versioned = false
-    ): void {
+    final protected function updateTable($entity, $quotedTableName, array $updateData, $versioned = false)
+    {
         $set    = [];
         $types  = [];
         $params = [];
@@ -487,7 +476,7 @@ class BasicEntityPersister implements EntityPersister
             $targetType    = PersisterHelper::getTypeOfField($targetMapping->identifier[0], $targetMapping, $this->em);
 
             if ($targetType === []) {
-                throw UnrecognizedField::byName($targetMapping->identifier[0]);
+                throw ORMException::unrecognizedField($targetMapping->identifier[0]);
             }
 
             $types[] = reset($targetType);
@@ -503,13 +492,13 @@ class BasicEntityPersister implements EntityPersister
             $params[] = $this->class->reflFields[$versionField]->getValue($entity);
 
             switch ($versionFieldType) {
-                case Types::SMALLINT:
-                case Types::INTEGER:
-                case Types::BIGINT:
+                case Type::SMALLINT:
+                case Type::INTEGER:
+                case Type::BIGINT:
                     $set[] = $versionColumn . ' = ' . $versionColumn . ' + 1';
                     break;
 
-                case Types::DATETIME_MUTABLE:
+                case Type::DATETIME:
                     $set[] = $versionColumn . ' = CURRENT_TIMESTAMP';
                     break;
             }
@@ -519,7 +508,7 @@ class BasicEntityPersister implements EntityPersister
              . ' SET ' . implode(', ', $set)
              . ' WHERE ' . implode(' = ? AND ', $where) . ' = ?';
 
-        $result = $this->conn->executeStatement($sql, $params, $types);
+        $result = $this->conn->executeUpdate($sql, $params, $types);
 
         if ($versioned && ! $result) {
             throw OptimisticLockException::lockFailed($entity);
@@ -619,13 +608,13 @@ class BasicEntityPersister implements EntityPersister
      * )
      * </code>
      *
-     * @param object $entity   The entity for which to prepare the data.
-     * @param bool   $isInsert Whether the data to be prepared refers to an insert statement.
+     * @param object $entity The entity for which to prepare the data.
      *
      * @return mixed[][] The prepared data.
+     *
      * @psalm-return array<string, array<array-key, mixed|null>>
      */
-    protected function prepareUpdateData($entity, bool $isInsert = false)
+    protected function prepareUpdateData($entity)
     {
         $versionField = null;
         $result       = [];
@@ -651,14 +640,6 @@ class BasicEntityPersister implements EntityPersister
                 $fieldMapping = $this->class->fieldMappings[$field];
                 $columnName   = $fieldMapping['columnName'];
 
-                if (! $isInsert && isset($fieldMapping['notUpdatable'])) {
-                    continue;
-                }
-
-                if ($isInsert && isset($fieldMapping['notInsertable'])) {
-                    continue;
-                }
-
                 $this->columnTypes[$columnName] = $fieldMapping['type'];
 
                 $result[$this->getOwningTable($field)][$columnName] = $newVal;
@@ -674,7 +655,7 @@ class BasicEntityPersister implements EntityPersister
             }
 
             if ($newVal !== null) {
-                $oid = spl_object_id($newVal);
+                $oid = spl_object_hash($newVal);
 
                 if (isset($this->queuedInserts[$oid]) || $uow->isScheduledForInsert($newVal)) {
                     // The associated entity $newVal is not yet persisted, so we must
@@ -722,11 +703,12 @@ class BasicEntityPersister implements EntityPersister
      * @param object $entity The entity for which to prepare the data.
      *
      * @return mixed[][] The prepared data for the tables to update.
+     *
      * @psalm-return array<string, mixed[]>
      */
     protected function prepareInsertData($entity)
     {
-        return $this->prepareUpdateData($entity, true);
+        return $this->prepareUpdateData($entity);
     }
 
     /**
@@ -790,6 +772,12 @@ class BasicEntityPersister implements EntityPersister
                 $hints['fetched']['r'][$assoc['inversedBy']] = true;
             }
 
+            /* cascade read-only status
+            if ($this->em->getUnitOfWork()->isReadOnly($sourceEntity)) {
+                $hints[Query::HINT_READ_ONLY] = true;
+            }
+            */
+
             $targetEntity = $this->load($identifier, null, $assoc, $hints);
 
             // Complete bidirectional association, if necessary
@@ -851,7 +839,7 @@ class BasicEntityPersister implements EntityPersister
             ? $this->expandCriteriaParameters($criteria)
             : $this->expandParameters($criteria);
 
-        return (int) $this->conn->executeQuery($sql, $params, $types)->fetchOne();
+        return (int) $this->conn->executeQuery($sql, $params, $types)->fetchColumn();
     }
 
     /**
@@ -928,17 +916,18 @@ class BasicEntityPersister implements EntityPersister
 
         $stmt = $this->getManyToManyStatement($assoc, $sourceEntity, $offset, $limit);
 
-        return $this->loadArrayFromResult($assoc, $stmt);
+        return $this->loadArrayFromStatement($assoc, $stmt);
     }
 
     /**
      * Loads an array of entities from a given DBAL statement.
      *
-     * @param mixed[] $assoc
+     * @param mixed[]   $assoc
+     * @param Statement $stmt
      *
      * @return mixed[]
      */
-    private function loadArrayFromResult(array $assoc, Result $stmt): array
+    private function loadArrayFromStatement($assoc, $stmt)
     {
         $rsm   = $this->currentPersisterContext->rsm;
         $hints = [UnitOfWork::HINT_DEFEREAGERLOAD => true];
@@ -954,15 +943,14 @@ class BasicEntityPersister implements EntityPersister
     /**
      * Hydrates a collection from a given DBAL statement.
      *
-     * @param mixed[] $assoc
+     * @param mixed[]              $assoc
+     * @param Statement            $stmt
+     * @param PersistentCollection $coll
      *
      * @return mixed[]
      */
-    private function loadCollectionFromStatement(
-        array $assoc,
-        Result $stmt,
-        PersistentCollection $coll
-    ): array {
+    private function loadCollectionFromStatement($assoc, $stmt, $coll)
+    {
         $rsm   = $this->currentPersisterContext->rsm;
         $hints = [
             UnitOfWork::HINT_DEFEREAGERLOAD => true,
@@ -988,16 +976,15 @@ class BasicEntityPersister implements EntityPersister
     }
 
     /**
-     * @param object $sourceEntity
-     * @psalm-param array<string, mixed> $assoc
-     *
-     * @return Result
+     * @return \Doctrine\DBAL\Driver\Statement
      *
      * @throws MappingException
+     *
+     * @psalm-param array<string, mixed> $assoc
      */
     private function getManyToManyStatement(
         array $assoc,
-        $sourceEntity,
+        object $sourceEntity,
         ?int $offset = null,
         ?int $limit = null
     ) {
@@ -1115,14 +1102,14 @@ class BasicEntityPersister implements EntityPersister
         $from   = ' FROM ' . $tableName . ' ' . $tableAlias;
         $join   = $this->currentPersisterContext->selectJoinSql . $joinSql;
         $where  = ($conditionSql ? ' WHERE ' . $conditionSql : '');
-        $lock   = $this->platform->appendLockHint($from, $lockMode ?? LockMode::NONE);
+        $lock   = $this->platform->appendLockHint($from, $lockMode);
         $query  = $select
             . $lock
             . $join
             . $where
             . $orderBySql;
 
-        return $this->platform->modifyLimitQuery($query, $limit, $offset ?? 0) . $lockSql;
+        return $this->platform->modifyLimitQuery($query, $limit, $offset) . $lockSql;
     }
 
     /**
@@ -1153,11 +1140,9 @@ class BasicEntityPersister implements EntityPersister
     /**
      * Gets the ORDER BY SQL snippet for ordered collections.
      *
-     * @psalm-param array<string, string> $orderBy
+     * @throws ORMException
      *
-     * @throws InvalidOrientation
-     * @throws InvalidFindByCall
-     * @throws UnrecognizedField
+     * @psalm-param array<string, string> $orderBy
      */
     final protected function getOrderBySQL(array $orderBy, string $baseTableAlias): string
     {
@@ -1167,7 +1152,7 @@ class BasicEntityPersister implements EntityPersister
             $orientation = strtoupper(trim($orientation));
 
             if ($orientation !== 'ASC' && $orientation !== 'DESC') {
-                throw InvalidOrientation::fromClassNameAndField($this->class->name, $fieldName);
+                throw ORMException::invalidOrientation($this->class->name, $fieldName);
             }
 
             if (isset($this->class->fieldMappings[$fieldName])) {
@@ -1183,7 +1168,7 @@ class BasicEntityPersister implements EntityPersister
 
             if (isset($this->class->associationMappings[$fieldName])) {
                 if (! $this->class->associationMappings[$fieldName]['isOwningSide']) {
-                    throw InvalidFindByCall::fromInverseSideUsage($this->class->name, $fieldName);
+                    throw ORMException::invalidFindByInverseAssociation($this->class->name, $fieldName);
                 }
 
                 $tableAlias = isset($this->class->associationMappings[$fieldName]['inherited'])
@@ -1198,7 +1183,7 @@ class BasicEntityPersister implements EntityPersister
                 continue;
             }
 
-            throw UnrecognizedField::byName($fieldName);
+            throw ORMException::unrecognizedField($fieldName);
         }
 
         return ' ORDER BY ' . implode(', ', $orderByList);
@@ -1365,9 +1350,9 @@ class BasicEntityPersister implements EntityPersister
      * Gets the SQL join fragment used when selecting entities from a
      * many-to-many association.
      *
-     * @psalm-param array<string, mixed> $manyToMany
-     *
      * @return string
+     *
+     * @psalm-param array<string, mixed> $manyToMany
      */
     protected function getSelectManyToManyJoinSQL(array $manyToMany)
     {
@@ -1446,6 +1431,7 @@ class BasicEntityPersister implements EntityPersister
      * columns placed in the INSERT statements used by the persister.
      *
      * @return string[] The list of columns.
+     *
      * @psalm-return list<string>
      */
     protected function getInsertColumnList()
@@ -1474,10 +1460,6 @@ class BasicEntityPersister implements EntityPersister
             }
 
             if (! $this->class->isIdGeneratorIdentity() || $this->class->identifier[0] !== $name) {
-                if (isset($this->class->fieldMappings[$name]['notInsertable'])) {
-                    continue;
-                }
-
                 $columns[]                = $this->quoteStrategy->getColumnName($name, $this->class, $this->platform);
                 $this->columnTypes[$name] = $this->class->fieldMappings[$name]['type'];
             }
@@ -1575,23 +1557,11 @@ class BasicEntityPersister implements EntityPersister
      * Gets the FROM and optionally JOIN conditions to lock the entity managed by this persister.
      *
      * @param int|null $lockMode One of the Doctrine\DBAL\LockMode::* constants.
-     * @psalm-param LockMode::*|null $lockMode
      *
      * @return string
      */
     protected function getLockTablesSql($lockMode)
     {
-        if ($lockMode === null) {
-            Deprecation::trigger(
-                'doctrine/orm',
-                'https://github.com/doctrine/orm/pull/9466',
-                'Passing null as argument to %s is deprecated, pass LockMode::NONE instead.',
-                __METHOD__
-            );
-
-            $lockMode = LockMode::NONE;
-        }
-
         return $this->platform->appendLockHint(
             'FROM '
             . $this->quoteStrategy->getTableName($this->class, $this->platform) . ' '
@@ -1631,7 +1601,7 @@ class BasicEntityPersister implements EntityPersister
              *  @todo try to support multi-column IN expressions.
              *  Example: (col1, col2) IN (('val1A', 'val2A'), ('val1B', 'val2B'))
              */
-            throw CantUseInOperatorOnCompositeKeys::create();
+            throw ORMException::cantUseInOperatorOnCompositeKeys();
         }
 
         foreach ($columns as $column) {
@@ -1690,18 +1660,17 @@ class BasicEntityPersister implements EntityPersister
     /**
      * Builds the left-hand-side of a where condition statement.
      *
-     * @psalm-param array<string, mixed>|null $assoc
+     * @param string $field
      *
      * @return string[]
-     * @psalm-return list<string>
      *
-     * @throws InvalidFindByCall
-     * @throws UnrecognizedField
+     * @throws ORMException
+     *
+     * @psalm-param array<string, mixed>|null $assoc
+     * @psalm-return list<string>
      */
-    private function getSelectConditionStatementColumnSQL(
-        string $field,
-        ?array $assoc = null
-    ): array {
+    private function getSelectConditionStatementColumnSQL($field, $assoc = null)
+    {
         if (isset($this->class->fieldMappings[$field])) {
             $className = $this->class->fieldMappings[$field]['inherited'] ?? $this->class->name;
 
@@ -1729,10 +1698,7 @@ class BasicEntityPersister implements EntityPersister
                 }
             } else {
                 if (! $association['isOwningSide']) {
-                    throw InvalidFindByCall::fromInverseSideUsage(
-                        $this->class->name,
-                        $field
-                    );
+                    throw ORMException::invalidFindByInverseAssociation($this->class->name, $field);
                 }
 
                 $className = $association['inherited'] ?? $this->class->name;
@@ -1745,7 +1711,7 @@ class BasicEntityPersister implements EntityPersister
             return $columns;
         }
 
-        if ($assoc !== null && ! str_contains($field, ' ') && ! str_contains($field, '(')) {
+        if ($assoc !== null && strpos($field, ' ') === false && strpos($field, '(') === false) {
             // very careless developers could potentially open up this normally hidden api for userland attacks,
             // therefore checking for spaces and function calls which are not allowed.
 
@@ -1753,7 +1719,7 @@ class BasicEntityPersister implements EntityPersister
             return [$field];
         }
 
-        throw UnrecognizedField::byName($field);
+        throw ORMException::unrecognizedField($field);
     }
 
     /**
@@ -1763,11 +1729,10 @@ class BasicEntityPersister implements EntityPersister
      * Subclasses are supposed to override this method if they intend to change
      * or alter the criteria by which entities are selected.
      *
-     * @param mixed[]|null $assoc
+     * @return string
+     *
      * @psalm-param array<string, mixed> $criteria
      * @psalm-param array<string, mixed>|null $assoc
-     *
-     * @return string
      */
     protected function getSelectConditionSQL(array $criteria, $assoc = null)
     {
@@ -1789,7 +1754,7 @@ class BasicEntityPersister implements EntityPersister
 
         $stmt = $this->getOneToManyStatement($assoc, $sourceEntity, $offset, $limit);
 
-        return $this->loadArrayFromResult($assoc, $stmt);
+        return $this->loadArrayFromStatement($assoc, $stmt);
     }
 
     /**
@@ -1805,15 +1770,16 @@ class BasicEntityPersister implements EntityPersister
     /**
      * Builds criteria and execute SQL statement to fetch the one to many entities from.
      *
-     * @param object $sourceEntity
+     * @param object   $sourceEntity
+     * @param int|null $offset
+     * @param int|null $limit
+     *
+     * @return Statement
+     *
      * @psalm-param array<string, mixed> $assoc
      */
-    private function getOneToManyStatement(
-        array $assoc,
-        $sourceEntity,
-        ?int $offset = null,
-        ?int $limit = null
-    ): Result {
+    private function getOneToManyStatement(array $assoc, $sourceEntity, $offset = null, $limit = null)
+    {
         $this->switchPersisterContext($offset, $limit);
 
         $criteria    = [];
@@ -1889,9 +1855,10 @@ class BasicEntityPersister implements EntityPersister
      *                             - class to which the field belongs to
      *
      * @return mixed[][]
-     * @psalm-return array{0: array, 1: list<int|string|null>}
+     *
+     * @psalm-return array{0: array, 1: list<mixed>}
      */
-    private function expandToManyParameters(array $criteria): array
+    private function expandToManyParameters($criteria)
     {
         $params = [];
         $types  = [];
@@ -1911,14 +1878,16 @@ class BasicEntityPersister implements EntityPersister
     /**
      * Infers field types to be used by parameter type casting.
      *
-     * @param mixed $value
+     * @param string $field
+     * @param mixed  $value
      *
      * @return int[]|null[]|string[]
-     * @psalm-return list<int|string|null>
      *
      * @throws QueryException
+     *
+     * @psalm-return list<(int|string|null)>
      */
-    private function getTypes(string $field, $value, ClassMetadata $class): array
+    private function getTypes($field, $value, ClassMetadata $class)
     {
         $types = [];
 
@@ -1967,9 +1936,9 @@ class BasicEntityPersister implements EntityPersister
      *
      * @param mixed $value
      *
-     * @return mixed[]
+     * @return array{mixed}
      */
-    private function getValues($value): array
+    private function getValues($value)
     {
         if (is_array($value)) {
             $newValue = [];
@@ -1981,7 +1950,20 @@ class BasicEntityPersister implements EntityPersister
             return [$newValue];
         }
 
-        return $this->getIndividualValue($value);
+        if (is_object($value) && $this->em->getMetadataFactory()->hasMetadataFor(ClassUtils::getClass($value))) {
+            $class = $this->em->getClassMetadata(get_class($value));
+            if ($class->isIdentifierComposite) {
+                $newValue = [];
+
+                foreach ($class->getIdentifierValues($value) as $innerValue) {
+                    $newValue = array_merge($newValue, $this->getValues($innerValue));
+                }
+
+                return $newValue;
+            }
+        }
+
+        return [$this->getIndividualValue($value)];
     }
 
     /**
@@ -1989,37 +1971,15 @@ class BasicEntityPersister implements EntityPersister
      *
      * @param mixed $value
      *
-     * @psalm-return list<mixed>
+     * @return mixed
      */
-    private function getIndividualValue($value): array
+    private function getIndividualValue($value)
     {
-        if (! is_object($value)) {
-            return [$value];
+        if (! is_object($value) || ! $this->em->getMetadataFactory()->hasMetadataFor(ClassUtils::getClass($value))) {
+            return $value;
         }
 
-        if ($value instanceof BackedEnum) {
-            return [$value->value];
-        }
-
-        $valueClass = ClassUtils::getClass($value);
-
-        if ($this->em->getMetadataFactory()->isTransient($valueClass)) {
-            return [$value];
-        }
-
-        $class = $this->em->getClassMetadata($valueClass);
-
-        if ($class->isIdentifierComposite) {
-            $newValue = [];
-
-            foreach ($class->getIdentifierValues($value) as $innerValue) {
-                $newValue = array_merge($newValue, $this->getValues($innerValue));
-            }
-
-            return $newValue;
-        }
-
-        return [$this->em->getUnitOfWork()->getSingleIdentifierValue($value)];
+        return $this->em->getUnitOfWork()->getSingleIdentifierValue($value);
     }
 
     /**
@@ -2036,7 +1996,7 @@ class BasicEntityPersister implements EntityPersister
         $alias = $this->getSQLTableAlias($this->class->name);
 
         $sql = 'SELECT 1 '
-             . $this->getLockTablesSql(LockMode::NONE)
+             . $this->getLockTablesSql(null)
              . ' WHERE ' . $this->getSelectConditionSQL($criteria);
 
         [$params, $types] = $this->expandParameters($criteria);
@@ -2054,16 +2014,15 @@ class BasicEntityPersister implements EntityPersister
             $sql .= ' AND ' . $filterSql;
         }
 
-        return (bool) $this->conn->fetchOne($sql, $params, $types);
+        return (bool) $this->conn->fetchColumn($sql, $params, 0, $types);
     }
 
     /**
      * Generates the appropriate join SQL for the given join column.
      *
-     * @param array[] $joinColumns The join columns definition of an association.
-     * @psalm-param array<array<string, mixed>> $joinColumns
-     *
      * @return string LEFT JOIN if one of the columns is nullable, INNER JOIN otherwise.
+     *
+     * @psalm-param array<array<string, mixed>> $joinColumns The join columns definition of an association.
      */
     protected function getJoinSQLForJoinColumns($joinColumns)
     {
@@ -2118,8 +2077,6 @@ class BasicEntityPersister implements EntityPersister
      *
      * @param int|null $offset
      * @param int|null $limit
-     *
-     * @return void
      */
     protected function switchPersisterContext($offset, $limit)
     {
@@ -2134,7 +2091,6 @@ class BasicEntityPersister implements EntityPersister
 
     /**
      * @return string[]
-     * @psalm-return list<string>
      */
     protected function getClassIdentifiersTypes(ClassMetadata $class): array
     {

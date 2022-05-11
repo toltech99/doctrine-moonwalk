@@ -1,13 +1,28 @@
 <?php
 
-declare(strict_types=1);
+/*
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * This software consists of voluntary contributions made by many individuals
+ * and is licensed under the MIT license. For more information, see
+ * <http://www.doctrine-project.org>.
+ */
 
 namespace Doctrine\ORM;
 
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Criteria;
 use Doctrine\ORM\Query\Expr;
-use Doctrine\ORM\Query\Parameter;
 use Doctrine\ORM\Query\QueryExpressionVisitor;
 use InvalidArgumentException;
 use RuntimeException;
@@ -27,7 +42,6 @@ use function is_string;
 use function key;
 use function reset;
 use function sprintf;
-use function str_starts_with;
 use function strpos;
 use function strrpos;
 use function substr;
@@ -75,7 +89,6 @@ class QueryBuilder
      * The type of query this is. Can be select, update or delete.
      *
      * @var int
-     * @psalm-var self::SELECT|self::DELETE|self::UPDATE
      */
     private $_type = self::SELECT;
 
@@ -83,14 +96,13 @@ class QueryBuilder
      * The state of the query object. Can be dirty or clean.
      *
      * @var int
-     * @psalm-var self::STATE_*
      */
     private $_state = self::STATE_CLEAN;
 
     /**
      * The complete DQL string for this query.
      *
-     * @var string|null
+     * @var string
      */
     private $_dql;
 
@@ -98,7 +110,6 @@ class QueryBuilder
      * The query parameters.
      *
      * @var ArrayCollection
-     * @psalm-var ArrayCollection<int, Parameter>
      */
     private $parameters;
 
@@ -123,11 +134,11 @@ class QueryBuilder
      */
     private $joinRootAliases = [];
 
-    /**
-     * Whether to use second level cache, if available.
-     *
-     * @var bool
-     */
+     /**
+      * Whether to use second level cache, if available.
+      *
+      * @var bool
+      */
     protected $cacheable = false;
 
     /**
@@ -141,7 +152,6 @@ class QueryBuilder
      * Second level query cache mode.
      *
      * @var int|null
-     * @psalm-var Cache::MODE_*|null
      */
     protected $cacheMode;
 
@@ -186,7 +196,7 @@ class QueryBuilder
      *
      * @param bool $cacheable
      *
-     * @return $this
+     * @return self
      */
     public function setCacheable($cacheable)
     {
@@ -196,9 +206,7 @@ class QueryBuilder
     }
 
     /**
-     * Are the query results enabled for second level cache?
-     *
-     * @return bool
+     * @return bool TRUE if the query results are enable for second level cache, FALSE otherwise.
      */
     public function isCacheable()
     {
@@ -208,7 +216,7 @@ class QueryBuilder
     /**
      * @param string $cacheRegion
      *
-     * @return $this
+     * @return self
      */
     public function setCacheRegion($cacheRegion)
     {
@@ -240,7 +248,7 @@ class QueryBuilder
      *
      * @param int $lifetime
      *
-     * @return $this
+     * @return self
      */
     public function setLifetime($lifetime)
     {
@@ -250,8 +258,7 @@ class QueryBuilder
     }
 
     /**
-     * @return int|null
-     * @psalm-return Cache::MODE_*|null
+     * @return int
      */
     public function getCacheMode()
     {
@@ -260,9 +267,8 @@ class QueryBuilder
 
     /**
      * @param int $cacheMode
-     * @psalm-param Cache::MODE_* $cacheMode
      *
-     * @return $this
+     * @return self
      */
     public function setCacheMode($cacheMode)
     {
@@ -275,7 +281,6 @@ class QueryBuilder
      * Gets the type of the currently built query.
      *
      * @return int
-     * @psalm-return self::SELECT|self::DELETE|self::UPDATE
      */
     public function getType()
     {
@@ -285,7 +290,7 @@ class QueryBuilder
     /**
      * Gets the associated EntityManager for this query builder.
      *
-     * @return EntityManagerInterface
+     * @return EntityManager
      */
     public function getEntityManager()
     {
@@ -296,7 +301,6 @@ class QueryBuilder
      * Gets the state of this query builder instance.
      *
      * @return int Either QueryBuilder::STATE_DIRTY or QueryBuilder::STATE_CLEAN.
-     * @psalm-return self::STATE_*
      */
     public function getState()
     {
@@ -387,10 +391,14 @@ class QueryBuilder
      *
      * @param string $alias       The alias of the new join entity
      * @param string $parentAlias The parent entity alias of the join relationship
+     *
+     * @return string
      */
-    private function findRootAlias(string $alias, string $parentAlias): string
+    private function findRootAlias($alias, $parentAlias)
     {
-        if (in_array($parentAlias, $this->getRootAliases(), true)) {
+        $rootAlias = null;
+
+        if (in_array($parentAlias, $this->getRootAliases())) {
             $rootAlias = $parentAlias;
         } elseif (isset($this->joinRootAliases[$parentAlias])) {
             $rootAlias = $this->joinRootAliases[$parentAlias];
@@ -446,8 +454,9 @@ class QueryBuilder
      *     $qb->getRootAliases(); // array('u')
      * </code>
      *
-     * @return string[]
-     * @psalm-return list<string>
+     * @return mixed[]
+     *
+     * @psalm-return list<mixed>
      */
     public function getRootAliases()
     {
@@ -481,8 +490,9 @@ class QueryBuilder
      *     $qb->getAllAliases(); // array('u','a')
      * </code>
      *
-     * @return string[]
-     * @psalm-return list<string>
+     * @return mixed[]
+     *
+     * @psalm-return list<mixed>
      */
     public function getAllAliases()
     {
@@ -501,8 +511,9 @@ class QueryBuilder
      *     $qb->getRootEntities(); // array('User')
      * </code>
      *
-     * @return string[]
-     * @psalm-return list<string>
+     * @return mixed[]
+     *
+     * @psalm-return list<mixed>
      */
     public function getRootEntities()
     {
@@ -536,9 +547,9 @@ class QueryBuilder
      *
      * @param string|int      $key   The parameter position or name.
      * @param mixed           $value The parameter value.
-     * @param string|int|null $type  ParameterType::* or \Doctrine\DBAL\Types\Type::* constant
+     * @param string|int|null $type  PDO::PARAM_* or \Doctrine\DBAL\Types\Type::* constant
      *
-     * @return $this
+     * @return self
      */
     public function setParameter($key, $value, $type = null)
     {
@@ -550,7 +561,7 @@ class QueryBuilder
             return $this;
         }
 
-        $this->parameters->add(new Parameter($key, $value, $type));
+        $this->parameters->add(new Query\Parameter($key, $value, $type));
 
         return $this;
     }
@@ -570,19 +581,18 @@ class QueryBuilder
      * </code>
      *
      * @param ArrayCollection|mixed[] $parameters The query parameters to set.
-     * @psalm-param ArrayCollection<int, Parameter>|mixed[] $parameters
      *
-     * @return $this
+     * @return self
      */
     public function setParameters($parameters)
     {
         // BC compatibility with 2.3-
         if (is_array($parameters)) {
-            /** @psalm-var ArrayCollection<int, Parameter> $parameterCollection */
+            /** @psalm-var ArrayCollection<int, Query\Parameter> $parameterCollection */
             $parameterCollection = new ArrayCollection();
 
             foreach ($parameters as $key => $value) {
-                $parameter = new Parameter($key, $value);
+                $parameter = new Query\Parameter($key, $value);
 
                 $parameterCollection->add($parameter);
             }
@@ -599,7 +609,6 @@ class QueryBuilder
      * Gets all defined query parameters for the query being constructed.
      *
      * @return ArrayCollection The currently defined query parameters.
-     * @psalm-return ArrayCollection<int, Parameter>
      */
     public function getParameters()
     {
@@ -609,16 +618,16 @@ class QueryBuilder
     /**
      * Gets a (previously set) query parameter of the query being constructed.
      *
-     * @param string|int $key The key (index or name) of the bound parameter.
+     * @param mixed $key The key (index or name) of the bound parameter.
      *
-     * @return Parameter|null The value of the bound parameter.
+     * @return Query\Parameter|null The value of the bound parameter.
      */
     public function getParameter($key)
     {
-        $key = Parameter::normalizeName($key);
+        $key = Query\Parameter::normalizeName($key);
 
         $filteredParameters = $this->parameters->filter(
-            static function (Parameter $parameter) use ($key): bool {
+            static function (Query\Parameter $parameter) use ($key): bool {
                 $parameterName = $parameter->getName();
 
                 return $key === $parameterName;
@@ -633,14 +642,10 @@ class QueryBuilder
      *
      * @param int|null $firstResult The first result to return.
      *
-     * @return $this
+     * @return self
      */
     public function setFirstResult($firstResult)
     {
-        if ($firstResult !== null) {
-            $firstResult = (int) $firstResult;
-        }
-
         $this->_firstResult = $firstResult;
 
         return $this;
@@ -662,14 +667,10 @@ class QueryBuilder
      *
      * @param int|null $maxResults The maximum number of results to retrieve.
      *
-     * @return $this
+     * @return self
      */
     public function setMaxResults($maxResults)
     {
-        if ($maxResults !== null) {
-            $maxResults = (int) $maxResults;
-        }
-
         $this->_maxResults = $maxResults;
 
         return $this;
@@ -692,12 +693,12 @@ class QueryBuilder
      * The available parts are: 'select', 'from', 'join', 'set', 'where',
      * 'groupBy', 'having' and 'orderBy'.
      *
-     * @param string              $dqlPartName The DQL part name.
-     * @param string|object|array $dqlPart     An Expr object.
-     * @param bool                $append      Whether to append (true) or replace (false).
-     * @psalm-param string|object|list<string>|array{join: array<int|string, object>} $dqlPart
+     * @param string $dqlPartName The DQL part name.
+     * @param bool   $append      Whether to append (true) or replace (false).
      *
-     * @return $this
+     * @return self
+     *
+     * @psalm-param string|object|list<string>|array{join: array<int|string, object>} $dqlPart     An Expr object.
      */
     public function add($dqlPartName, $dqlPart, $append = false)
     {
@@ -760,7 +761,7 @@ class QueryBuilder
      *
      * @param mixed $select The selection expressions.
      *
-     * @return $this
+     * @return self
      */
     public function select($select = null)
     {
@@ -787,7 +788,7 @@ class QueryBuilder
      *
      * @param bool $flag
      *
-     * @return $this
+     * @return self
      */
     public function distinct($flag = true)
     {
@@ -809,7 +810,7 @@ class QueryBuilder
      *
      * @param mixed $select The selection expression.
      *
-     * @return $this
+     * @return self
      */
     public function addSelect($select = null)
     {
@@ -835,10 +836,10 @@ class QueryBuilder
      *         ->setParameter('user_id', 1);
      * </code>
      *
-     * @param string|null $delete The class/type whose instances are subject to the deletion.
-     * @param string|null $alias  The class/type alias used in the constructed query.
+     * @param string $delete The class/type whose instances are subject to the deletion.
+     * @param string $alias  The class/type alias used in the constructed query.
      *
-     * @return $this
+     * @return self
      */
     public function delete($delete = null, $alias = null)
     {
@@ -862,10 +863,10 @@ class QueryBuilder
      *         ->where('u.id = ?2');
      * </code>
      *
-     * @param string|null $update The class/type whose instances are subject to the update.
-     * @param string|null $alias  The class/type alias used in the constructed query.
+     * @param string $update The class/type whose instances are subject to the update.
+     * @param string $alias  The class/type alias used in the constructed query.
      *
-     * @return $this
+     * @return self
      */
     public function update($update = null, $alias = null)
     {
@@ -888,11 +889,11 @@ class QueryBuilder
      *         ->from('User', 'u');
      * </code>
      *
-     * @param string      $from    The class name.
-     * @param string      $alias   The alias of the class.
-     * @param string|null $indexBy The index for the from.
+     * @param string $from    The class name.
+     * @param string $alias   The alias of the class.
+     * @param string $indexBy The index for the from.
      *
-     * @return $this
+     * @return self
      */
     public function from($from, $alias, $indexBy = null)
     {
@@ -918,7 +919,7 @@ class QueryBuilder
      * @param string $alias   The root alias of the class.
      * @param string $indexBy The index for the from.
      *
-     * @return $this
+     * @return self
      *
      * @throws Query\QueryException
      */
@@ -926,7 +927,7 @@ class QueryBuilder
     {
         $rootAliases = $this->getRootAliases();
 
-        if (! in_array($alias, $rootAliases, true)) {
+        if (! in_array($alias, $rootAliases)) {
             throw new Query\QueryException(
                 sprintf('Specified root alias %s must be set before invoking indexBy().', $alias)
             );
@@ -958,14 +959,13 @@ class QueryBuilder
      *         ->join('u.Phonenumbers', 'p', Expr\Join::WITH, 'p.is_primary = 1');
      * </code>
      *
-     * @param string                                     $join          The relationship to join.
-     * @param string                                     $alias         The alias of the join.
-     * @param string|null                                $conditionType The condition type constant. Either ON or WITH.
-     * @param string|Expr\Comparison|Expr\Composite|null $condition     The condition for the join.
-     * @param string|null                                $indexBy       The index for the join.
-     * @psalm-param Expr\Join::ON|Expr\Join::WITH|null $conditionType
+     * @param string      $join          The relationship to join.
+     * @param string      $alias         The alias of the join.
+     * @param string|null $conditionType The condition type constant. Either ON or WITH.
+     * @param string|null $condition     The condition for the join.
+     * @param string|null $indexBy       The index for the join.
      *
-     * @return $this
+     * @return self
      */
     public function join($join, $alias, $conditionType = null, $condition = null, $indexBy = null)
     {
@@ -985,18 +985,17 @@ class QueryBuilder
      *         ->from('User', 'u')
      *         ->innerJoin('u.Phonenumbers', 'p', Expr\Join::WITH, 'p.is_primary = 1');
      *
-     * @param string                                     $join          The relationship to join.
-     * @param string                                     $alias         The alias of the join.
-     * @param string|null                                $conditionType The condition type constant. Either ON or WITH.
-     * @param string|Expr\Comparison|Expr\Composite|null $condition     The condition for the join.
-     * @param string|null                                $indexBy       The index for the join.
-     * @psalm-param Expr\Join::ON|Expr\Join::WITH|null $conditionType
+     * @param string      $join          The relationship to join.
+     * @param string      $alias         The alias of the join.
+     * @param string|null $conditionType The condition type constant. Either ON or WITH.
+     * @param string|null $condition     The condition for the join.
+     * @param string|null $indexBy       The index for the join.
      *
-     * @return $this
+     * @return self
      */
     public function innerJoin($join, $alias, $conditionType = null, $condition = null, $indexBy = null)
     {
-        $parentAlias = substr($join, 0, (int) strpos($join, '.'));
+        $parentAlias = substr($join, 0, strpos($join, '.'));
 
         $rootAlias = $this->findRootAlias($alias, $parentAlias);
 
@@ -1026,18 +1025,17 @@ class QueryBuilder
      *         ->leftJoin('u.Phonenumbers', 'p', Expr\Join::WITH, 'p.is_primary = 1');
      * </code>
      *
-     * @param string                                     $join          The relationship to join.
-     * @param string                                     $alias         The alias of the join.
-     * @param string|null                                $conditionType The condition type constant. Either ON or WITH.
-     * @param string|Expr\Comparison|Expr\Composite|null $condition     The condition for the join.
-     * @param string|null                                $indexBy       The index for the join.
-     * @psalm-param Expr\Join::ON|Expr\Join::WITH|null $conditionType
+     * @param string      $join          The relationship to join.
+     * @param string      $alias         The alias of the join.
+     * @param string|null $conditionType The condition type constant. Either ON or WITH.
+     * @param string|null $condition     The condition for the join.
+     * @param string|null $indexBy       The index for the join.
      *
-     * @return $this
+     * @return self
      */
     public function leftJoin($join, $alias, $conditionType = null, $condition = null, $indexBy = null)
     {
-        $parentAlias = substr($join, 0, (int) strpos($join, '.'));
+        $parentAlias = substr($join, 0, strpos($join, '.'));
 
         $rootAlias = $this->findRootAlias($alias, $parentAlias);
 
@@ -1066,7 +1064,7 @@ class QueryBuilder
      * @param string $key   The key/field to set.
      * @param mixed  $value The value, expression, placeholder, etc.
      *
-     * @return $this
+     * @return self
      */
     public function set($key, $value)
     {
@@ -1097,7 +1095,7 @@ class QueryBuilder
      *
      * @param mixed $predicates The restriction predicates.
      *
-     * @return $this
+     * @return self
      */
     public function where($predicates)
     {
@@ -1124,7 +1122,7 @@ class QueryBuilder
      *
      * @param mixed $where The query restrictions.
      *
-     * @return $this
+     * @return self
      */
     public function andWhere()
     {
@@ -1157,7 +1155,7 @@ class QueryBuilder
      *
      * @param mixed $where The WHERE statement.
      *
-     * @return $this
+     * @return self
      */
     public function orWhere()
     {
@@ -1187,7 +1185,7 @@ class QueryBuilder
      *
      * @param string $groupBy The grouping expression.
      *
-     * @return $this
+     * @return self
      */
     public function groupBy($groupBy)
     {
@@ -1207,7 +1205,7 @@ class QueryBuilder
      *
      * @param string $groupBy The grouping expression.
      *
-     * @return $this
+     * @return self
      */
     public function addGroupBy($groupBy)
     {
@@ -1220,7 +1218,7 @@ class QueryBuilder
      *
      * @param mixed $having The restriction over the groups.
      *
-     * @return $this
+     * @return self
      */
     public function having($having)
     {
@@ -1237,7 +1235,7 @@ class QueryBuilder
      *
      * @param mixed $having The restriction to append.
      *
-     * @return $this
+     * @return self
      */
     public function andHaving($having)
     {
@@ -1260,7 +1258,7 @@ class QueryBuilder
      *
      * @param mixed $having The restriction to add.
      *
-     * @return $this
+     * @return self
      */
     public function orHaving($having)
     {
@@ -1282,9 +1280,9 @@ class QueryBuilder
      * Replaces any previously specified orderings, if any.
      *
      * @param string|Expr\OrderBy $sort  The ordering expression.
-     * @param string|null         $order The ordering direction.
+     * @param string              $order The ordering direction.
      *
-     * @return $this
+     * @return self
      */
     public function orderBy($sort, $order = null)
     {
@@ -1297,9 +1295,9 @@ class QueryBuilder
      * Adds an ordering to the query results.
      *
      * @param string|Expr\OrderBy $sort  The ordering expression.
-     * @param string|null         $order The ordering direction.
+     * @param string              $order The ordering direction.
      *
-     * @return $this
+     * @return self
      */
     public function addOrderBy($sort, $order = null)
     {
@@ -1315,7 +1313,7 @@ class QueryBuilder
      * Adds orderings.
      * Overrides firstResult and maxResults if they're set.
      *
-     * @return $this
+     * @return self
      *
      * @throws Query\QueryException
      */
@@ -1340,7 +1338,7 @@ class QueryBuilder
             foreach ($criteria->getOrderings() as $sort => $order) {
                 $hasValidAlias = false;
                 foreach ($allAliases as $alias) {
-                    if (str_starts_with($sort . '.', $alias . '.')) {
+                    if (strpos($sort . '.', $alias . '.') === 0) {
                         $hasValidAlias = true;
                         break;
                     }
@@ -1390,7 +1388,10 @@ class QueryBuilder
         return $this->_dqlParts;
     }
 
-    private function getDQLForDelete(): string
+    /**
+     * @return string
+     */
+    private function getDQLForDelete()
     {
          return 'DELETE'
               . $this->getReducedDQLQueryPart('from', ['pre' => ' ', 'separator' => ', '])
@@ -1398,7 +1399,10 @@ class QueryBuilder
               . $this->getReducedDQLQueryPart('orderBy', ['pre' => ' ORDER BY ', 'separator' => ', ']);
     }
 
-    private function getDQLForUpdate(): string
+    /**
+     * @return string
+     */
+    private function getDQLForUpdate()
     {
          return 'UPDATE'
               . $this->getReducedDQLQueryPart('from', ['pre' => ' ', 'separator' => ', '])
@@ -1407,7 +1411,10 @@ class QueryBuilder
               . $this->getReducedDQLQueryPart('orderBy', ['pre' => ' ORDER BY ', 'separator' => ', ']);
     }
 
-    private function getDQLForSelect(): string
+    /**
+     * @return string
+     */
+    private function getDQLForSelect()
     {
         $dql = 'SELECT'
              . ($this->_dqlParts['distinct'] === true ? ' DISTINCT' : '')
@@ -1462,10 +1469,9 @@ class QueryBuilder
     /**
      * Resets DQL parts.
      *
-     * @param string[]|null $parts
-     * @psalm-param list<string>|null $parts
+     * @return self
      *
-     * @return $this
+     * @psalm-param list<string>|null $parts
      */
     public function resetDQLParts($parts = null)
     {
@@ -1485,7 +1491,7 @@ class QueryBuilder
      *
      * @param string $part
      *
-     * @return $this
+     * @return self
      */
     public function resetDQLPart($part)
     {

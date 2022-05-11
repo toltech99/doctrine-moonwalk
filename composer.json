@@ -1,17 +1,15 @@
 {
-    
-    "authors": [
-        {
-            "name": "Gustavo Santos",
-            "email": "toltech99@gmail.com",
-            "role": "Developer"
-        }
-    ],
-
-    
-    "require": {
-        "doctrine/orm": "*",
-
-        "mpdf/mpdf":"*"
-    }
+	"name" : "entradas/entradas",
+	"type" : "project",
+	"description" : "entradas",
+	"require" : {
+		"doctrine/orm" : "*",
+		"mpdf/mpdf" : "^8.0",
+		"mpdf/qrcode": "^1.1"
+	},
+	"autoload" : {
+		"psr-0" : {
+			"" : "modelo"
+		}
+	}
 }

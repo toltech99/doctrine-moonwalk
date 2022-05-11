@@ -7,6 +7,7 @@ use InvalidArgumentException as BaseInvalidArgumentException;
 
 use function get_class;
 use function gettype;
+use function interface_exists;
 use function is_object;
 use function sprintf;
 
@@ -28,9 +29,10 @@ class InvalidArgumentException extends BaseInvalidArgumentException implements P
     /**
      * @param string $className
      * @param string $proxyNamespace
-     * @psalm-param class-string $className
      *
      * @return self
+     *
+     * @psalm-param class-string $className
      */
     public static function notProxyClass($className, $proxyNamespace)
     {
@@ -77,9 +79,10 @@ class InvalidArgumentException extends BaseInvalidArgumentException implements P
 
     /**
      * @param string $className
-     * @psalm-param class-string $className
      *
      * @return self
+     *
+     * @psalm-param class-string $className
      */
     public static function classMustNotBeAbstract($className)
     {
@@ -88,9 +91,10 @@ class InvalidArgumentException extends BaseInvalidArgumentException implements P
 
     /**
      * @param string $className
-     * @psalm-param class-string $className
      *
      * @return self
+     *
+     * @psalm-param class-string $className
      */
     public static function classMustNotBeFinal($className)
     {
@@ -105,3 +109,5 @@ class InvalidArgumentException extends BaseInvalidArgumentException implements P
         return new self(sprintf('Invalid auto generate mode "%s" given.', $value));
     }
 }
+
+interface_exists(Proxy::class);

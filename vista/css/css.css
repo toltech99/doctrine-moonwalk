@@ -1,0 +1,77 @@
+#entrada {
+	border: solid 1px black;
+	width: 678px;
+	background: linear-gradient(to bottom, #e66465, #9198e5);
+}
+
+#logo {
+	width: 110px;
+	margin-top: 20px;
+	margin-left: 20px;
+}
+
+#imgGrupo {
+	height: 110px;
+	margin-top: 20px;
+	margin-right: 20px;
+	float: right;
+}
+
+#grupo {
+	color: white;
+	text-shadow: 2px 2px 2px black;
+	margin-top: 0px;
+	margin-left: 20px;
+	margin-right: 20px;
+	margin-bottom: 0px;
+}
+
+#subtitulo {
+	margin-top: 0px;
+	margin-left: 20px;
+	margin-right: 20px;
+	margin-bottom: 0px;
+}
+
+#datos {
+	border-radius: 10px;
+	background-color: white;
+	margin-top: 10px;
+	margin-left: 20px;
+	margin-right: 20px;
+	margin-bottom: 0px;
+	text-align: center;
+}
+
+#info {
+	margin: 0px;
+	margin-top: 10px;
+	font-weight: bold;
+	font-size: 16px;
+}
+
+#subinfo {
+	font-weight: normal;
+}
+
+#subtexto {
+	margin-left: 10px;
+	margin-top: 0px;
+}
+
+#recortar {
+	margin-top: 10px;
+	border-top: 1px dashed black;
+}
+
+#qr {
+	margin: 20px;
+	margin-top: 10px;
+	margin-bottom: 10px;
+}
+
+#barra {
+	margin: 20px;	
+	margin-top: 10px;
+	margin-bottom: 10px;
+}
