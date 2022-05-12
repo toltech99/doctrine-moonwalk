@@ -11,8 +11,8 @@
     "description": "entradas",
     "require": {
         "doctrine/orm": "*",
-        "mpdf/mpdf": "*",
-        "mpdf/qrcode": "*"
+		"mpdf/mpdf" : "^8.1.1",
+        "mpdf/qrcode": "^1.2.0"
     },
     "autoload": {
         "psr-0": {
