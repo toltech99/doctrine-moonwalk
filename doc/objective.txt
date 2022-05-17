@@ -1,0 +1,33 @@
+E01. Generació d'entrades en pdf i xml
+
+L'objectiu de la present pràctica és realitzar una aplicació per fer servir llibreries externes disponibles a internet ( https://github.com/mpdf/mpdf ).
+
+Aquesta pràctica consisteix en generar un servei als nostres clients per que puguin imprimir d'una forma autònoma una fitxer pdf amb l'entrada a un espectacle.
+
+La nostra aplicació rebrà una petició GET amb un únic paràmetre:
+
+- ref: La referència de validació de l'entrada (corresponent al id de la taula ENTRADA).
+
+o
+
+-data: la data per tornar els espectacles del dia en format xml
+
+No és requisit (però si recomanable) l'us de cap framework ni de cap gestor de plantilles però sí que és requisit fer servir el patró MVC, separant el codi d'accés a dades del control i minimitzant el codi PHP dins de l'HTML (serà molt tingut en compte).
+IMPRESCINDIBLES per PDF
+
+- Codi de barres amb la referència de valicació de l'entrada.
+
+- Codi QR amb la paina web que genera l'entrada
+
+- Format en color
+
+- Marca d'aigua
+
+- Document protegit amb contraseña.
+
+- Incorpora el logo de la teva empresa.
+
+S'haurà d'obtenir un document semblant al adjunts
+IMPRESCINDIBLES per XML
+
+Que sigui un xml ben format.
