@@ -36,17 +36,17 @@ class ControladorFrontal extends Controlador
                 if ($this->comprobarMetodo($controlador, $accion)) {
                     $controlador->$accion($data);
                 } else {
-                    $error = "La acción no existe.";
+                    $error = "La acción establecida no existe. Introduzca parámetros:";
                     $vista = new ErrorVista($error);
                     $vista->show();
                 }
             } else {
-                $error = "El controlador no existe.";
+                $error = "El controlador establecido no existe. Introduzca parámetros:";
                 $vista = new ErrorVista($error);
                 $vista->show();
             }
         } else {
-            $error = "Nada por aquí...";
+            $error = "Introduzca parámetros:";
             $vista = new ErrorVista($error);
             $vista->show();
         }

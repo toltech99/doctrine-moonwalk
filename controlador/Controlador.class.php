@@ -27,8 +27,7 @@ class Controlador
             // $output = mysql_real_escape_string ( $input );
         }
 
-        $input = trim($input, '/'); // trec la barra final
-
+        $input = trim($input, '/'); // Elimina la barra del final, si la hubiere.
         $input = filter_var($input, FILTER_SANITIZE_URL);
 
         return $input;

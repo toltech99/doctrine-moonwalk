@@ -10,6 +10,7 @@ class ControladorSalida extends Controlador
         $consulta = $entityManager->createQuery("SELECT e FROM Entrada e");
         $resultado = $consulta->getResult();
 
+        //recopilación de datos del resultado.
         $conciertos = [];
 
         foreach ($resultado as $auxiliar) {
@@ -22,7 +23,7 @@ class ControladorSalida extends Controlador
                 $concierto["direccion"] = $auxiliar->getLocalitzacio()->getAdreca();
                 $concierto["localidad"] = $auxiliar->getLocalitzacio()->getLocalitat();
 
-                // Para eliminar duplicado
+                // añadir concierto si no existe ya.
                 if (! in_array($concierto, $conciertos)) {
                     array_push($conciertos, $concierto);
                 }
@@ -31,16 +32,17 @@ class ControladorSalida extends Controlador
 
         if (count($conciertos) != 0) {
 
-            // Crear xml con dom
+            // Crear XML con DOM
             $dom = new DOMDocument();
             $dom->encoding = 'utf-8';
             $dom->xmlVersion = '1.0';
             $dom->formatOutput = true;
 
             $xml_file_name = "conciertos-" . str_replace("/", ".", $data) . ".xml";
-
+            //<!DOCTYPE html>
+           
             $root = $dom->createElement('conciertos');
-
+            
             foreach ($conciertos as $concierto) {
                 $concierto_nodo = $dom->createElement('concierto');
                 $attr_concierto_fecha = new DOMAttr('fecha', $data);
@@ -64,7 +66,10 @@ class ControladorSalida extends Controlador
             $dom->appendChild($root);
 
             $xml_string = $dom->saveXML();
+            
             header("Content-type: text/xml");
+            
+            //TODO: presentar esto en una tabla.
             echo $xml_string;
         } else {
             $error = "No hay conciertos para la fecha.";
